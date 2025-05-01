@@ -3,7 +3,7 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      nodejs: 14
+      nodejs: 20
     commands:
       - echo "Installing dependencies..."
       - unzip -q ${CODEBUILD_SRC_DIR}/source_output/${S3_OBJECT_KEY} -d ${CODEBUILD_SRC_DIR}/lambda

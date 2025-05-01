@@ -30,7 +30,7 @@ resource "aws_lambda_function" "main" {
   function_name = var.lambda_function_name
   role          = aws_iam_role.lambda_exec.arn
   handler       = "index.handler"
-  runtime       = "nodejs14.x"
+  runtime       = "nodejs20.x"
 
   environment {
     variables = {
@@ -38,7 +38,37 @@ resource "aws_lambda_function" "main" {
     }
   }
 }
+# Add a new IAM policy for CodeDeploy (add this new resource)
+resource "aws_iam_role_policy" "codedeploy_policy" {
+  name = "${var.project_name}-codedeploy-policy"
+  role = aws_iam_role.codepipeline_role.id
 
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "codedeploy:CreateDeployment",
+          "codedeploy:GetDeploymentConfig",
+          "codedeploy:RegisterApplicationRevision",
+          "codedeploy:GetApplicationRevision",
+          "codedeploy:GetDeployment",
+          "codedeploy:CreateDeploymentGroup",
+          "codedeploy:GetDeploymentGroup"
+        ],
+        Resource = "*"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "iam:PassRole"
+        ],
+        Resource = aws_iam_role.codepipeline_role.arn
+      }
+    ]
+  })
+}
 # IAM Role for CodeBuild
 resource "aws_iam_role" "codebuild_role" {
   name = "${var.project_name}-codebuild-role"
@@ -201,13 +231,18 @@ resource "aws_codedeploy_deployment_group" "lambda" {
   deployment_config_name = "CodeDeployDefault.LambdaAllAtOnce"
 
   deployment_style {
-    deployment_type = "BLUE_GREEN"
+    deployment_type   = "BLUE_GREEN"
     deployment_option = "WITH_TRAFFIC_CONTROL"
   }
 
   auto_rollback_configuration {
     enabled = true
     events  = ["DEPLOYMENT_FAILURE"]
+  }
+
+  # Add this lifecycle block to prevent issues with blue/green deployments
+  lifecycle {
+    ignore_changes = [deployment_style]
   }
 }
 
