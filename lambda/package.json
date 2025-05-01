@@ -1,0 +1,11 @@
+{
+    "name": "my-lambda-function",
+    "version": "1.0.0",
+    "description": "Sample Lambda function",
+    "main": "index.js",
+    "scripts": {
+      "test": "echo \"Tests passed\" && exit 0"
+    },
+    "author": "",
+    "license": "ISC"
+  }
