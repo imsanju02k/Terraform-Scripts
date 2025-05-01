@@ -15,10 +15,16 @@ variable "lambda_function_name" {
   type        = string
   default     = "my-function"
 }
+variable "environment" {
+  description = "Name of the environment (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+}
 
 variable "s3_bucket_name" {
   description = "Name of the S3 bucket containing Lambda code"
   type        = string
+  default = "dev-sanju-tf-bucket"
 }
 
 variable "s3_code_prefix" {
