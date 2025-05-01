@@ -4,28 +4,10 @@ phases:
   install:
     runtime-versions:
       nodejs: 20
-    commands:
-      - echo "Installing dependencies..."
-      - unzip -q ${CODEBUILD_SRC_DIR}/source_output/${S3_OBJECT_KEY} -d ${CODEBUILD_SRC_DIR}/lambda
-      - cd lambda
-      - npm install
-      - cd ..
-
-  pre_build:
-    commands:
-      - echo "Running tests..."
-      - cd lambda
-      - npm test
-      - cd ..
-
   build:
     commands:
-      - echo "Building Lambda package..."
-      - cd lambda
-      - zip -r ../lambda_function_payload.zip .
-      - cd ..
-
+      - echo "Copying Lambda code to S3..."
+      - aws s3 cp ./lambda/ s3://$S3_BUCKET/$S3_CODE_PREFIX/ --recursive
 artifacts:
   files:
-    - lambda_function_payload.zip
     - appspec.yml

@@ -2,7 +2,7 @@ provider "aws" {
   region = var.region
 }
 
-# IAM Role for Lambda
+# IAM Role for Lambda Execution
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-exec-role"
 
@@ -23,14 +23,17 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Lambda Function
+# Lambda Function (using direct code from S3)
 resource "aws_lambda_function" "main" {
-  s3_bucket     = var.s3_bucket_name
-  s3_key        = var.s3_object_key
   function_name = var.lambda_function_name
   role          = aws_iam_role.lambda_exec.arn
   handler       = "index.handler"
   runtime       = "nodejs20.x"
+  memory_size   = 128
+  timeout       = 3
+
+  s3_bucket = var.s3_bucket_name
+  s3_key    = "${var.s3_code_prefix}/index.js" # e.g. "lambda-code/index.js"
 
   environment {
     variables = {
@@ -38,37 +41,7 @@ resource "aws_lambda_function" "main" {
     }
   }
 }
-# Add a new IAM policy for CodeDeploy (add this new resource)
-resource "aws_iam_role_policy" "codedeploy_policy" {
-  name = "${var.project_name}-codedeploy-policy"
-  role = aws_iam_role.codepipeline_role.id
 
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect = "Allow",
-        Action = [
-          "codedeploy:CreateDeployment",
-          "codedeploy:GetDeploymentConfig",
-          "codedeploy:RegisterApplicationRevision",
-          "codedeploy:GetApplicationRevision",
-          "codedeploy:GetDeployment",
-          "codedeploy:CreateDeploymentGroup",
-          "codedeploy:GetDeploymentGroup"
-        ],
-        Resource = "*"
-      },
-      {
-        Effect = "Allow",
-        Action = [
-          "iam:PassRole"
-        ],
-        Resource = aws_iam_role.codepipeline_role.arn
-      }
-    ]
-  })
-}
 # IAM Role for CodeBuild
 resource "aws_iam_role" "codebuild_role" {
   name = "${var.project_name}-codebuild-role"
@@ -93,32 +66,13 @@ resource "aws_iam_role_policy" "codebuild_policy" {
     Statement = [
       {
         Effect = "Allow",
-        Resource = "*",
         Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "s3:GetObject",
-          "s3:GetObjectVersion",
-          "s3:PutObject",
-          "lambda:UpdateFunctionCode",
-          "lambda:GetFunction",
-          "lambda:UpdateFunctionConfiguration",
-          "codebuild:CreateReportGroup",
-          "codebuild:CreateReport",
-          "codebuild:UpdateReport",
-          "codebuild:BatchPutTestCases"
-        ]
-      },
-      {
-        Effect = "Allow",
-        Resource = [
-          "arn:aws:s3:::${var.s3_bucket_name}",
-          "arn:aws:s3:::${var.s3_bucket_name}/*"
+          "logs:*",
+          "s3:*",
+          "lambda:*",
+          "codebuild:*"
         ],
-        Action = [
-          "s3:*"
-        ]
+        Resource = "*"
       }
     ]
   })
@@ -141,8 +95,7 @@ resource "aws_iam_role" "codepipeline_role" {
 }
 
 resource "aws_iam_role_policy" "codepipeline_policy" {
-  name = "${var.project_name}-codepipeline-policy"
-  role = aws_iam_role.codepipeline_role.id
+  role = aws_iam_role.codepipeline_role.name
 
   policy = jsonencode({
     Version = "2012-10-17",
@@ -150,36 +103,36 @@ resource "aws_iam_role_policy" "codepipeline_policy" {
       {
         Effect = "Allow",
         Action = [
-          "s3:GetObject",
-          "s3:GetObjectVersion",
-          "s3:GetBucketVersioning",
-          "s3:PutObjectAcl",
-          "s3:PutObject"
-        ],
-        Resource = [
-          "arn:aws:s3:::${var.s3_bucket_name}",
-          "arn:aws:s3:::${var.s3_bucket_name}/*"
-        ]
-      },
-      {
-        Effect = "Allow",
-        Action = [
-          "codebuild:BatchGetBuilds",
-          "codebuild:StartBuild",
-          "codedeploy:CreateDeployment",
-          "codedeploy:GetApplication",
-          "codedeploy:GetApplicationRevision",
-          "codedeploy:GetDeployment",
-          "codedeploy:GetDeploymentConfig",
-          "codedeploy:RegisterApplicationRevision",
-          "lambda:UpdateFunctionCode",
-          "lambda:UpdateFunctionConfiguration",
-          "lambda:GetFunction"
+          "s3:*",
+          "codebuild:*",
+          "codedeploy:*",
+          "lambda:*"
         ],
         Resource = "*"
       }
     ]
   })
+}
+
+# IAM Role for CodeDeploy
+resource "aws_iam_role" "codedeploy_role" {
+  name = "${var.project_name}-codedeploy-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = {
+        Service = "codedeploy.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "codedeploy_role" {
+  role       = aws_iam_role.codedeploy_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
 }
 
 # CodeBuild Project
@@ -194,19 +147,21 @@ resource "aws_codebuild_project" "build" {
   }
 
   environment {
-    compute_type                = "BUILD_GENERAL1_SMALL"
-    image                       = "aws/codebuild/standard:5.0"
-    type                        = "LINUX_CONTAINER"
-    image_pull_credentials_type = "CODEBUILD"
-    privileged_mode             = true
+    compute_type = "BUILD_GENERAL1_SMALL"
+    image        = "aws/codebuild/standard:6.0"
+    type         = "LINUX_CONTAINER"
 
     environment_variable {
-      name  = "LAMBDA_FUNCTION_NAME"
-      value = aws_lambda_function.main.function_name
+      name  = "S3_BUCKET"
+      value = var.s3_bucket_name
     }
     environment_variable {
-      name  = "S3_BUCKET_NAME"
-      value = var.s3_bucket_name
+      name  = "S3_CODE_PREFIX"
+      value = var.s3_code_prefix
+    }
+    environment_variable {
+      name  = "LAMBDA_FUNCTION_NAME"
+      value = var.lambda_function_name
     }
   }
 
@@ -226,7 +181,7 @@ resource "aws_codedeploy_app" "lambda" {
 resource "aws_codedeploy_deployment_group" "lambda" {
   app_name              = aws_codedeploy_app.lambda.name
   deployment_group_name = "${var.project_name}-deploy-group"
-  service_role_arn      = aws_iam_role.codepipeline_role.arn
+  service_role_arn      = aws_iam_role.codedeploy_role.arn
 
   deployment_config_name = "CodeDeployDefault.LambdaAllAtOnce"
 
@@ -238,11 +193,6 @@ resource "aws_codedeploy_deployment_group" "lambda" {
   auto_rollback_configuration {
     enabled = true
     events  = ["DEPLOYMENT_FAILURE"]
-  }
-
-  # Add this lifecycle block to prevent issues with blue/green deployments
-  lifecycle {
-    ignore_changes = [deployment_style]
   }
 }
 
@@ -269,7 +219,7 @@ resource "aws_codepipeline" "pipeline" {
 
       configuration = {
         S3Bucket = var.s3_bucket_name
-        S3ObjectKey = var.s3_object_key
+        S3ObjectKey = "${var.s3_code_prefix}/source.zip" # Your raw 
       }
     }
   }
